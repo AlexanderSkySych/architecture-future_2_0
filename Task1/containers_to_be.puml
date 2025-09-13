@@ -1,0 +1,127 @@
+@startuml
+!include C4_Container.puml
+
+title Система TO BE Через год
+
+AddRelTag("auth", $textColor="blue", $lineColor="blue")
+AddRelTag("subscribe", $textColor="orange", $lineColor="orange")
+AddRelTag("raw", $textColor="blue", $lineColor="red")
+AddRelTag("query", $textColor="blue", $lineColor="green")
+
+Person_Ext(client, "Клиент", "")
+Person(emp_head, "Сотрудник головного офиса", "")
+Person(emp_medic, "Сотрудник клиники", "")
+Person(emp_finance, "Сотрудник финансового офиса", "")
+
+
+System_Boundary(system_medicamente, "Будущее 2.0") {
+
+    ContainerQueue(bus, "Шина данных", "Kafka")
+
+    System_Boundary(system_dwh, "Медицинская система DLH") {
+        Container(legacy_dwh, "Legacy DWH storrage", "")
+
+        Container(processing_injest_struct, "Прием структурированых данных", "")
+        Container(processing_injest_unstruct, "Прием неструктурированных данных", "")
+
+        ContainerDb(storrage_unstruct, "Хранилище НЕ обработанных данных", "")
+
+        Container(processing_struct, "Обработчик структурированных данных", "Apache Airflow")
+        Container(processing_unstruct, "Обработчик сырых данных", "Apache NiFi")
+
+        ContainerDb(storrage_processed, "Хранилище обработанных данных", "Snowflake")
+        ContainerDb(storrage_s3, "S3-Хранилище", "Minio")
+
+        Container(lakehouse, "Data Lakehouse", "Apache Iceberg")
+
+        Container(engine_queries, "Query Engine", "Dremio")
+    }
+
+    System_Boundary(system_services, "Внутренние сервисы") {
+        Container(auth_keycloak_inner, "Сервис Авторизации Сотрудников", "Keycloak")
+
+        Container(busyness_bi, "BI-Система", "Power BI")
+
+        Container(service_busyness, "Бизнесс сервисы компании", "")
+        Container(service_medical, "Медицинские сервисы компании", "")
+        Container(service_finance, "Финансовые сервисы компании", "Golang и Java")
+        Container(service_ai, "ИИ сервисы компании", "")
+
+        Container(service_constructor, "Конструктор отчетов", "Python")
+        ContainerDb(service_db_constructor, "База данных конструктора отчетов", "Postgres")
+    }
+
+
+    System_Boundary(system_portal, "Портал пользователей") {
+        Container(auth_keycloak_outer, "Сервис Авторизации Клиентов", "Keycloak")
+
+        Container(portal_frontend, "Фронтенд интерфейс", "React")
+        Container(portal_backend, "Бэкенд", "Java")
+
+        ContainerDb(portal_db, "База данных портала", "Postgres")
+    }
+
+}
+
+' Взаимодействия с людьми
+Rel(client, portal_frontend, "")
+Rel(emp_head, busyness_bi, "")
+Rel(emp_head, service_busyness, "")
+Rel(emp_medic, service_medical, "")
+Rel(emp_finance, service_finance, "")
+
+
+' Auth
+Rel(busyness_bi, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_busyness, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_medical, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_finance, auth_keycloak_inner, "auth", $tags = "auth")
+
+
+Rel(service_medical, service_ai, "")
+Rel(service_constructor, service_db_constructor, "")
+
+
+' DLH
+Rel(processing_injest_struct, storrage_unstruct, "")
+Rel(storrage_unstruct, processing_struct, "")
+Rel(processing_injest_unstruct, processing_unstruct, "")
+
+Rel(processing_struct, storrage_processed, "")
+Rel(legacy_dwh, processing_struct, "")
+Rel(processing_unstruct, storrage_s3, "")
+
+Rel(lakehouse, storrage_s3, "")
+Rel(lakehouse, storrage_processed, "")
+Rel(engine_queries, lakehouse, "")
+' DLH
+
+Rel(portal_frontend, auth_keycloak_outer, "auth", $tags = "auth")
+Rel(portal_frontend, portal_backend, "")
+Rel(portal_backend, auth_keycloak_outer, "auth", $tags = "auth")
+Rel(portal_backend, portal_db, "")
+
+' Передача в шину данных
+Rel(portal_backend, bus, "")
+Rel(service_medical, bus, "")
+
+' Подписки
+Rel_Back(bus, service_busyness, "Subs", $tags = "subscribe")
+Rel_Back(bus, service_medical, "Subs", $tags = "subscribe")
+Rel_Back(bus, service_finance, "Subs", $tags = "subscribe")
+
+' Передача в ingest
+Rel_Back(bus, processing_injest_struct, "Subs", $tags = "subscribe")
+Rel(service_medical, processing_injest_unstruct, "", $tags = "raw")
+Rel(portal_backend, processing_injest_unstruct, "", $tags = "raw")
+
+' Запросы данных из озера
+Rel(busyness_bi, service_constructor, "", $tags = "query")
+Rel(service_finance, service_constructor, "", $tags = "query")
+Rel(service_medical, service_constructor, "", $tags = "query")
+Rel(service_busyness, service_constructor, "", $tags = "query")
+Rel(service_ai, service_constructor, "", $tags = "query")
+
+Rel(service_constructor, engine_queries, "", $tags = "query")
+
+Lay_Left(legacy_dwh, a1)
