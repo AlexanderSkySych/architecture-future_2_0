@@ -1,0 +1,40 @@
+@startuml
+!include C4_Container.puml
+
+title Процессы (TO BE)
+
+
+Person_Ext(client, "Клиент", "")
+Person(emp_head, "Сотрудник головного офиса", "")
+Person(emp_medic, "Сотрудник клиники", "")
+Person(emp_finance, "Сотрудник финансового офиса", "")
+
+Container(system_portal, "Портал пользователей")
+Container(system_dwh, "Медицинская система DLH")
+
+Container(busyness_bi, "BI-Система", "Power BI")
+
+Container(service_constructor, "Конструктор отчетов", "Python")
+Container(service_busyness, "Бизнесс сервисы компании", "")
+Container(service_medical, "Медицинские сервисы компании", "")
+Container(service_finance, "Финансовые сервисы компании", "Golang и Java")
+Container(service_ai, "ИИ сервисы компании", "")
+
+
+Rel(client, system_portal, "")
+Rel(system_portal, system_dwh, "")
+Rel(system_dwh, service_constructor, "")
+Rel(system_dwh, service_ai, "")
+
+Rel(service_constructor, service_busyness, "")
+Rel(service_constructor, service_medical, "")
+Rel(service_constructor, service_finance, "")
+Rel(service_constructor, busyness_bi, "")
+
+
+Rel(service_ai, service_medical, "")
+
+Rel(service_busyness, emp_head, "")
+Rel(service_medical, emp_medic, "")
+Rel(service_finance, emp_finance, "")
+Rel(busyness_bi, emp_head, "")
