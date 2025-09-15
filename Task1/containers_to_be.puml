@@ -1,0 +1,126 @@
+@startuml
+!include C4_Container.puml
+
+title Система TO BE Через год
+
+AddRelTag("auth", $textColor="blue", $lineColor="blue")
+AddRelTag("subscribe", $textColor="orange", $lineColor="orange")
+AddRelTag("dlh", $textColor="black", $lineColor="red")
+AddRelTag("query", $textColor="green", $lineColor="green")
+
+Person_Ext(client, "Клиент", "")
+Person(emp_head, "Сотрудник головного офиса", "")
+Person(emp_medic, "Сотрудник клиники", "")
+Person(emp_finance, "Сотрудник финансового офиса", "")
+
+
+System_Boundary(system_medicamente, "Будущее 2.0") {
+
+    ContainerQueue(bus, "Шина данных", "Kafka", "Отвечает за асинхронный обмен сообщениями и командами. Также передает небольшие порции сруктурированных данных в DLH")
+
+    System_Boundary(system_dwh, "Медицинская система DLH") {
+        Container(legacy_dwh, "Legacy DWH storrage", "", "Старая система DWH. Будет отключена после того как все данные будут переботаны и перенесены в новую систему.")
+
+        Container(processing_injest_struct, "Прием структурированых данных", "", "Принимает структурированные данные в формате text, json, csv и xml")
+        Container(processing_injest_unstruct, "Прием неструктурированных данных", "", "Принимает неструктурированные данные (Изображения, Видео, Медицинские форматы, итп)")
+
+        ContainerDb(storrage_unstruct, "Хранилище НЕ обработанных данных", "", "Хранит стрктурированные данные до обработки.")
+
+        Container(processing_struct, "Обработчик структурированных данных", "Apache Airflow", "Преобразовывает данные")
+        Container(processing_unstruct, "Обработчик сырых данных", "Apache NiFi", "Преобразовывает данные")
+
+        ContainerDb(storrage_processed, "Хранилище обработанных данных", "Snowflake")
+        ContainerDb(storrage_s3, "S3-Хранилище", "Minio")
+
+        Container(lakehouse, "Data Lakehouse", "Apache Iceberg")
+
+        Container(engine_queries, "Query Engine", "Dremio")
+    }
+
+    System_Boundary(system_services, "Внутренние сервисы") {
+        Container(auth_keycloak_inner, "Сервис Авторизации Сотрудников", "Keycloak")
+
+        Container(busyness_bi, "BI-Система", "Power BI")
+
+        Container(service_busyness, "Бизнесс сервисы компании", "")
+        Container(service_medical, "Медицинские сервисы компании", "")
+        Container(service_finance, "Финансовые сервисы компании", "Golang и Java")
+        Container(service_ai, "ИИ сервисы компании", "")
+
+        Container(service_constructor, "Конструктор отчетов", "Python")
+        ContainerDb(service_db_constructor, "База данных конструктора отчетов", "Postgres")
+    }
+
+
+    System_Boundary(system_portal, "Портал пользователей") {
+        Container(auth_keycloak_outer, "Сервис Авторизации Клиентов", "Keycloak")
+
+        Container(portal_frontend, "Фронтенд интерфейс", "React")
+        Container(portal_backend, "Бэкенд", "Java")
+
+        ContainerDb(portal_db, "База данных портала", "Postgres")
+    }
+
+}
+
+' Взаимодействия с людьми
+Rel_Right(client, portal_frontend, "")
+Rel(emp_head, busyness_bi, "")
+Rel(emp_head, service_busyness, "")
+Rel(emp_medic, service_medical, "")
+Rel(emp_finance, service_finance, "")
+
+
+' Auth
+Rel(busyness_bi, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_busyness, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_medical, auth_keycloak_inner, "auth", $tags = "auth")
+Rel(service_finance, auth_keycloak_inner, "auth", $tags = "auth")
+
+
+Rel(service_medical, service_ai, "")
+Rel(service_constructor, service_db_constructor, "")
+
+
+' DLH
+Rel(processing_injest_struct, storrage_unstruct, "")
+Rel(storrage_unstruct, processing_struct, "Передача данных на  преобразование")
+Rel(processing_injest_unstruct, processing_unstruct, "Передача файлов на обработку")
+
+Rel(processing_struct, storrage_processed, "Сохранение преобразованных данных")
+Rel(legacy_dwh, processing_struct, "Постепенная передача данных на преобразование")
+Rel(processing_unstruct, storrage_s3, "Сохранение обработанных файлов")
+
+Rel(lakehouse, storrage_s3, "Запрос данных")
+Rel(lakehouse, storrage_processed, "Запрос данных")
+Rel(engine_queries, lakehouse, "Аналитические запросы данных")
+' DLH
+
+Rel(portal_frontend, auth_keycloak_outer, "auth", $tags = "auth")
+Rel(portal_frontend, portal_backend, "")
+Rel(portal_backend, auth_keycloak_outer, "auth", $tags = "auth")
+Rel(portal_backend, portal_db, "")
+
+' Передача в шину данных
+BiRel(bus, portal_backend, "Pub/Sub", $tags = "subscribe")
+BiRel(bus, service_medical, "Pub/Sub", $tags = "subscribe")
+Rel_Back(bus, service_busyness, "Sub", $tags = "subscribe")
+Rel_Back(bus, service_finance, "Sub", $tags = "subscribe")
+
+' Передача в ingest
+Rel_Back(bus, processing_injest_struct, "Sub", $tags = "subscribe")
+Rel(service_medical, processing_injest_unstruct, "Неструктурированные  данные через SFTP", $tags = "dlh")
+Rel(service_medical, processing_injest_struct, "Большие порции структурированных данных через REST", $tags = "dlh")
+Rel_Left(portal_backend, processing_injest_unstruct, "Неструктурированные  данные через SFTP", $tags = "dlh")
+Rel_Left(portal_backend, processing_injest_struct, "Большие порции структурированных данных через REST", $tags = "dlh")
+
+' Запросы данных из озера
+Rel(busyness_bi, service_constructor, "", $tags = "query")
+Rel(service_finance, service_constructor, "", $tags = "query")
+Rel(service_medical, service_constructor, "", $tags = "query")
+Rel(service_busyness, service_constructor, "", $tags = "query")
+Rel(service_ai, service_constructor, "", $tags = "query")
+
+Rel(service_constructor, engine_queries, "Аналитические запросы данных", $tags = "query")
+
+Lay_Left(legacy_dwh, a1)
