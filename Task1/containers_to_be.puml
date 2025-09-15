@@ -5,8 +5,8 @@ title Система TO BE Через год
 
 AddRelTag("auth", $textColor="blue", $lineColor="blue")
 AddRelTag("subscribe", $textColor="orange", $lineColor="orange")
-AddRelTag("raw", $textColor="blue", $lineColor="red")
-AddRelTag("query", $textColor="blue", $lineColor="green")
+AddRelTag("dlh", $textColor="black", $lineColor="red")
+AddRelTag("query", $textColor="green", $lineColor="green")
 
 Person_Ext(client, "Клиент", "")
 Person(emp_head, "Сотрудник головного офиса", "")
@@ -16,18 +16,18 @@ Person(emp_finance, "Сотрудник финансового офиса", "")
 
 System_Boundary(system_medicamente, "Будущее 2.0") {
 
-    ContainerQueue(bus, "Шина данных", "Kafka")
+    ContainerQueue(bus, "Шина данных", "Kafka", "Отвечает за асинхронный обмен сообщениями и командами. Также передает небольшие порции сруктурированных данных в DLH")
 
     System_Boundary(system_dwh, "Медицинская система DLH") {
-        Container(legacy_dwh, "Legacy DWH storrage", "")
+        Container(legacy_dwh, "Legacy DWH storrage", "", "Старая система DWH. Будет отключена после того как все данные будут переботаны и перенесены в новую систему.")
 
-        Container(processing_injest_struct, "Прием структурированых данных", "")
-        Container(processing_injest_unstruct, "Прием неструктурированных данных", "")
+        Container(processing_injest_struct, "Прием структурированых данных", "", "Принимает структурированные данные в формате text, json, csv и xml")
+        Container(processing_injest_unstruct, "Прием неструктурированных данных", "", "Принимает неструктурированные данные (Изображения, Видео, Медицинские форматы, итп)")
 
-        ContainerDb(storrage_unstruct, "Хранилище НЕ обработанных данных", "")
+        ContainerDb(storrage_unstruct, "Хранилище НЕ обработанных данных", "", "Хранит стрктурированные данные до обработки.")
 
-        Container(processing_struct, "Обработчик структурированных данных", "Apache Airflow")
-        Container(processing_unstruct, "Обработчик сырых данных", "Apache NiFi")
+        Container(processing_struct, "Обработчик структурированных данных", "Apache Airflow", "Преобразовывает данные")
+        Container(processing_unstruct, "Обработчик сырых данных", "Apache NiFi", "Преобразовывает данные")
 
         ContainerDb(storrage_processed, "Хранилище обработанных данных", "Snowflake")
         ContainerDb(storrage_s3, "S3-Хранилище", "Minio")
@@ -64,7 +64,7 @@ System_Boundary(system_medicamente, "Будущее 2.0") {
 }
 
 ' Взаимодействия с людьми
-Rel(client, portal_frontend, "")
+Rel_Right(client, portal_frontend, "")
 Rel(emp_head, busyness_bi, "")
 Rel(emp_head, service_busyness, "")
 Rel(emp_medic, service_medical, "")
@@ -84,16 +84,16 @@ Rel(service_constructor, service_db_constructor, "")
 
 ' DLH
 Rel(processing_injest_struct, storrage_unstruct, "")
-Rel(storrage_unstruct, processing_struct, "")
-Rel(processing_injest_unstruct, processing_unstruct, "")
+Rel(storrage_unstruct, processing_struct, "Передача данных на  преобразование")
+Rel(processing_injest_unstruct, processing_unstruct, "Передача файлов на обработку")
 
-Rel(processing_struct, storrage_processed, "")
-Rel(legacy_dwh, processing_struct, "")
-Rel(processing_unstruct, storrage_s3, "")
+Rel(processing_struct, storrage_processed, "Сохранение преобразованных данных")
+Rel(legacy_dwh, processing_struct, "Постепенная передача данных на преобразование")
+Rel(processing_unstruct, storrage_s3, "Сохранение обработанных файлов")
 
-Rel(lakehouse, storrage_s3, "")
-Rel(lakehouse, storrage_processed, "")
-Rel(engine_queries, lakehouse, "")
+Rel(lakehouse, storrage_s3, "Запрос данных")
+Rel(lakehouse, storrage_processed, "Запрос данных")
+Rel(engine_queries, lakehouse, "Аналитические запросы данных")
 ' DLH
 
 Rel(portal_frontend, auth_keycloak_outer, "auth", $tags = "auth")
@@ -102,18 +102,17 @@ Rel(portal_backend, auth_keycloak_outer, "auth", $tags = "auth")
 Rel(portal_backend, portal_db, "")
 
 ' Передача в шину данных
-Rel(portal_backend, bus, "")
-Rel(service_medical, bus, "")
-
-' Подписки
-Rel_Back(bus, service_busyness, "Subs", $tags = "subscribe")
-Rel_Back(bus, service_medical, "Subs", $tags = "subscribe")
-Rel_Back(bus, service_finance, "Subs", $tags = "subscribe")
+BiRel(bus, portal_backend, "Pub/Sub", $tags = "subscribe")
+BiRel(bus, service_medical, "Pub/Sub", $tags = "subscribe")
+Rel_Back(bus, service_busyness, "Sub", $tags = "subscribe")
+Rel_Back(bus, service_finance, "Sub", $tags = "subscribe")
 
 ' Передача в ingest
-Rel_Back(bus, processing_injest_struct, "Subs", $tags = "subscribe")
-Rel(service_medical, processing_injest_unstruct, "", $tags = "raw")
-Rel(portal_backend, processing_injest_unstruct, "", $tags = "raw")
+Rel_Back(bus, processing_injest_struct, "Sub", $tags = "subscribe")
+Rel(service_medical, processing_injest_unstruct, "Неструктурированные  данные через SFTP", $tags = "dlh")
+Rel(service_medical, processing_injest_struct, "Большие порции структурированных данных через REST", $tags = "dlh")
+Rel_Left(portal_backend, processing_injest_unstruct, "Неструктурированные  данные через SFTP", $tags = "dlh")
+Rel_Left(portal_backend, processing_injest_struct, "Большие порции структурированных данных через REST", $tags = "dlh")
 
 ' Запросы данных из озера
 Rel(busyness_bi, service_constructor, "", $tags = "query")
@@ -122,6 +121,6 @@ Rel(service_medical, service_constructor, "", $tags = "query")
 Rel(service_busyness, service_constructor, "", $tags = "query")
 Rel(service_ai, service_constructor, "", $tags = "query")
 
-Rel(service_constructor, engine_queries, "", $tags = "query")
+Rel(service_constructor, engine_queries, "Аналитические запросы данных", $tags = "query")
 
 Lay_Left(legacy_dwh, a1)
